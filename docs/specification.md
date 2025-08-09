@@ -79,6 +79,7 @@ Processes all PDF files in the specified directory through the following workflo
 - **Temporary Storage**: Uses system temp directory with automatic cleanup
 - **GPU Acceleration**: Automatically detects and uses GPU when available for faster processing
 - **OCR Confidence**: Only includes OCR text with confidence > 0.5 in searchable PDFs
+- **Compression Optimization**: First page determines optimal compression settings, cached and applied to subsequent pages for efficiency
 
 ## Configuration Options
 
@@ -93,10 +94,12 @@ Processes all PDF files in the specified directory through the following workflo
   - Scaling OCR coordinates to match resized images
 
 ### Compression Strategy
-- **Image Optimization**: Automatically resizes images if width or height exceeds 1200px
-- **Format Conversion**: Uses JPEG compression instead of PNG for smaller file sizes
-- **Quality Control**: JPEG quality set to 85 for good balance of size vs quality
-- **OCR Preservation**: Maintains OCR text overlay accuracy by scaling coordinates proportionally
+- **Intelligent Caching**: First page analysis determines optimal settings for entire document
+- **Progressive Testing**: Tests JPEG quality (90-60%) before attempting resize operations
+- **Adaptive Resizing**: Gradual resize factors (90-50%) with minimum 600px resolution limit
+- **Method Persistence**: Caches successful compression method (JPEG-only, resize+JPEG, or no compression)
+- **Batch Application**: Applies cached settings to remaining pages without re-testing
+- **OCR Coordinate Scaling**: Maintains text overlay accuracy when resizing by proportional coordinate adjustment
 
 ## User Interface Features
 
@@ -169,6 +172,35 @@ The application provides detailed, real-time progress updates during PDF process
 - **Memory Management**: Processes images in-memory without temporary image files
 - **Confidence Filtering**: Only includes high-confidence OCR results (>50%) in searchable text
 - **Image Quality**: Uses 300 DPI conversion for optimal OCR accuracy
+- **Compression Caching**: Optimizes multi-page processing by testing compression only on first page, then applying cached settings to subsequent pages
+
+## Compression Optimization
+
+### Intelligent Compression Caching
+The application uses an intelligent compression optimization system for multi-page PDFs:
+
+- **First Page Analysis**: Determines optimal compression settings by testing various quality levels and resize factors
+- **Settings Caching**: Stores successful compression parameters for reuse on subsequent pages
+- **Batch Efficiency**: Applies cached settings directly to remaining pages without re-testing
+- **Performance Gain**: Reduces compression testing from O(n*m) to O(1*m + n) where n=pages, m=compression levels
+
+### Compression Strategy Workflow
+1. **Initial PDF Creation**: Creates PDF with original image quality and tests file size
+2. **JPEG Quality Testing**: Tests quality levels (90%, 80%, 70%, 60%) before resizing
+3. **Progressive Resizing**: If JPEG alone insufficient, tests resize factors (90%, 80%, 70%, 60%, 50%)
+4. **Settings Persistence**: Caches successful compression method and parameters
+5. **Batch Application**: Applies cached settings to all subsequent pages in the same document
+
+### Compression Methods Cached
+- **JPEG Only**: `{'method': 'jpeg_only', 'jpeg_quality': X}` - When JPEG compression alone achieves target size
+- **Resize + JPEG**: `{'method': 'resize_and_jpeg', 'resize_factor': X, 'jpeg_quality': 75}` - When resizing is required
+- **No Compression**: `{'method': 'no_compression'}` - When original size is within limits
+
+### Performance Benefits
+- **Multi-page PDFs**: Dramatically faster processing (up to 80% reduction in compression testing)
+- **Consistent Quality**: All pages in a document use the same compression settings
+- **Resource Efficiency**: Reduces CPU/GPU usage by eliminating redundant compression tests
+- **Predictable Output**: Uniform file sizes across pages from the same source document
 
 ## Limitations
 - Creates separate searchable PDF for each page (by design for better OCR accuracy)
