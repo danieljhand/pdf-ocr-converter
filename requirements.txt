@@ -5,3 +5,4 @@ PyPDF2==3.0.1
 easyocr==1.7.0
 streamlit
 reportlab==4.0.4
+torch>=1.9.0

@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
+def check_gpu_availability():
+    """
+    Checks if GPU is available for EasyOCR.
+    Returns (gpu_available, gpu_info)
+    """
+    try:
+        # Try to import and check PyTorch CUDA
+        import torch
+        if torch.cuda.is_available():
+            gpu_count = torch.cuda.device_count()
+            gpu_name = torch.cuda.get_device_name(0) if gpu_count > 0 else "Unknown GPU"
+            return True, f"{gpu_name} ({gpu_count} device{'s' if gpu_count > 1 else ''})"
+    except ImportError:
+        pass
+    
+    try:
+        # Fallback: Try EasyOCR's own GPU detection
+        import easyocr
+        # Create a temporary reader to test GPU
+        test_reader = easyocr.Reader(['en'], gpu=True, verbose=False)
+        return True, "GPU detected by EasyOCR"
+    except Exception:
+        pass
+    
+    return False, "No GPU available - using CPU"
+
 def validate_pdf_file(pdf_file, pdf_name):
     """
     Validates uploaded PDF file for size and format.
@@ -125,9 +151,17 @@ def process_single_pdf(pdf_file, pdf_name):
         temp_dir = tempfile.mkdtemp()
         logger.info(f"Processing {pdf_name} in {temp_dir}")
         
-        # Initialize EasyOCR reader (this may take time on first run)
+        # Initialize EasyOCR reader with GPU detection
         if reader is None:
-            reader = easyocr.Reader(['en'], gpu=False)  # Use CPU only for compatibility
+            gpu_available, gpu_info = check_gpu_availability()
+            logger.info(f"GPU status: {gpu_info}")
+            
+            if gpu_available:
+                st.info(f"🚀 Using GPU acceleration: {gpu_info}")
+                reader = easyocr.Reader(['en'], gpu=True)
+            else:
+                st.info(f"💻 Using CPU processing: {gpu_info}")
+                reader = easyocr.Reader(['en'], gpu=False)
         
         # Convert PDF to images using pdf2image
         pdf_file.seek(0)
@@ -228,6 +262,14 @@ def main():
             st.info("**Installation:**")
             st.code("pip install easyocr pdf2image reportlab")
             return
+        
+        # Display GPU status
+        gpu_available, gpu_info = check_gpu_availability()
+        if gpu_available:
+            st.success(f"🚀 GPU acceleration available: {gpu_info}")
+        else:
+            st.info(f"💻 Using CPU processing: {gpu_info}")
+            st.caption("For faster processing, install PyTorch with CUDA support")
         
         # Display uploaded files with size info
         for file in uploaded_files:
