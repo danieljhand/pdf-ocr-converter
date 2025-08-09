@@ -1,2 +1,4 @@
 env
 .aider*
+.DS_Store
+input_pdfs
