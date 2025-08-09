@@ -5,6 +5,8 @@ from datetime import datetime
 import shutil
 import tempfile
 import streamlit as st
+import zipfile
+import io
 
 def process_single_pdf(pdf_file, pdf_name):
     """
@@ -74,6 +76,18 @@ def process_single_pdf(pdf_file, pdf_name):
         except Exception as e:
             return [], f"An unexpected error occurred: {e}"
 
+def create_zip_archive(processed_pdfs):
+    """
+    Creates a ZIP archive containing all processed PDF files.
+    """
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for pdf in processed_pdfs:
+            zip_file.writestr(pdf['name'], pdf['data'])
+    
+    zip_buffer.seek(0)
+    return zip_buffer
+
 def main():
     st.title("PDF OCR Processing Application")
     st.write("Upload PDF files to convert them into searchable PDFs using OCR")
@@ -127,6 +141,7 @@ def main():
     if 'processed_results' in st.session_state and st.session_state.processed_results:
         st.subheader("Download Processed PDFs")
         
+        # Individual downloads
         for result in st.session_state.processed_results:
             st.download_button(
                 label=f"Download {result['name']}",
@@ -134,6 +149,16 @@ def main():
                 file_name=result['name'],
                 mime="application/pdf"
             )
+        
+        # ZIP archive download
+        st.subheader("Download All as ZIP Archive")
+        zip_buffer = create_zip_archive(st.session_state.processed_results)
+        st.download_button(
+            label="Download All PDFs as ZIP",
+            data=zip_buffer,
+            file_name="processed_pdfs.zip",
+            mime="application/zip"
+        )
 
 if __name__ == "__main__":
     main()
