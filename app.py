@@ -14,6 +14,20 @@ from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader
 import numpy as np
 
+# Fix for Pillow compatibility with older libraries
+try:
+    from PIL import Image
+    if not hasattr(Image, 'ANTIALIAS'):
+        Image.ANTIALIAS = Image.LANCZOS
+    if not hasattr(Image, 'NEAREST'):
+        Image.NEAREST = Image.Resampling.NEAREST
+    if not hasattr(Image, 'BILINEAR'):
+        Image.BILINEAR = Image.Resampling.BILINEAR
+    if not hasattr(Image, 'BICUBIC'):
+        Image.BICUBIC = Image.Resampling.BICUBIC
+except ImportError:
+    pass
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
