@@ -11,8 +11,7 @@ This application processes PDF files by converting them to searchable PDFs using
 
 ## Dependencies
 ### External Tools Required
-- **pdftoppm**: Converts PDF pages to PNG images (part of poppler-utils)
-- **tesseract**: Performs OCR on images to create searchable PDFs
+- No external system tools required (pure Python implementation)
 
 ### Python Libraries
 - `os`: File system operations
@@ -21,6 +20,12 @@ This application processes PDF files by converting them to searchable PDFs using
 - `datetime`: Handle timestamps
 - `shutil`: File operations (cleanup)
 - `streamlit`: Web application framework for the user interface
+- `easyocr`: OCR processing library
+- `pdf2image`: Convert PDF pages to images
+- `reportlab`: PDF generation and manipulation
+- `PyPDF2`: PDF file validation and reading
+- `pillow`: Image processing
+- `numpy`: Array operations for image data
 
 ## Functionality
 
@@ -33,13 +38,15 @@ Processes all PDF files in the specified directory through the following workflo
 
 3. **Image Conversion**: 
    - Creates temporary directory for each PDF
-   - Uses `pdftoppm` to convert PDF pages to PNG images
-   - Output format: `page-1.png`, `page-2.png`, etc.
+   - Uses `pdf2image` library to convert PDF pages to PIL Image objects
+   - High resolution conversion (300 DPI) for better OCR accuracy
 
 4. **OCR Processing**:
-   - Processes each PNG image with `tesseract`
-   - Language: English (`-l eng`)
-   - Output format: Searchable PDF
+   - Processes each image with `EasyOCR` library
+   - Language: English (`['en']`)
+   - GPU acceleration when available, CPU fallback
+   - Confidence threshold filtering (>0.5)
+   - Output format: Searchable PDF with invisible text overlay
 
 5. **File Naming**: 
    - Format: `YYYY-MM-DD-UUID.pdf`
@@ -70,6 +77,8 @@ Processes all PDF files in the specified directory through the following workflo
 - **Memory Usage**: Processes files individually to manage memory
 - **Concurrent Processing**: Single-threaded processing to avoid resource conflicts
 - **Temporary Storage**: Uses system temp directory with automatic cleanup
+- **GPU Acceleration**: Automatically detects and uses GPU when available for faster processing
+- **OCR Confidence**: Only includes OCR text with confidence > 0.5 in searchable PDFs
 
 ## Configuration Options
 
@@ -119,7 +128,9 @@ Processes all PDF files in the specified directory through the following workflo
 - Download functionality uses Streamlit's download_button component
 - Temporary directories use format: `temp_[original_filename_without_extension]`
 - Each PDF page generates a separate searchable PDF (current implementation)
-- OCR language can be modified by changing the `-l eng` parameter
+- OCR language can be modified by changing the `['en']` parameter in EasyOCR Reader initialization
+- GPU acceleration automatically detected and used when PyTorch with CUDA is available
+- OCR text overlay is invisible but searchable, preserving original document appearance
 - Requires system PATH access to external tools
 - Output PDF size is controlled through image compression and resizing while preserving OCR accuracy
 
