@@ -61,11 +61,28 @@ Processes all PDF files in the specified directory through the following workflo
 - Individual download buttons for each processed file
 - Original PDF files are not modified
 
+## Technical Constraints
+- **File Size Limit**: 50MB per PDF file
+- **Supported Formats**: PDF files only (validated before processing)
+- **Memory Usage**: Processes files individually to manage memory
+- **Concurrent Processing**: Single-threaded processing to avoid resource conflicts
+- **Temporary Storage**: Uses system temp directory with automatic cleanup
+
 ## Error Handling
-- **FileNotFoundError**: Missing external tools (pdftoppm, tesseract)
-- **subprocess.CalledProcessError**: Command execution failures
-- **General Exception**: Catches unexpected errors
-- All errors are logged with descriptive messages
+- **Input Validation**: Validates uploaded files are proper PDFs before processing
+- **File Size Limits**: Enforces maximum file size to prevent memory issues
+- **External Tool Validation**: Checks for required tools before processing begins
+- **Graceful Degradation**: Individual file failures don't stop batch processing
+- **Resource Management**: Ensures temporary files are cleaned up even on errors
+- **User Feedback**: Provides clear, actionable error messages
+- **Logging**: Comprehensive logging for debugging and monitoring
+
+### Common Error Scenarios
+- Invalid or corrupted PDF files
+- Missing external dependencies (pdftoppm, tesseract)
+- Insufficient system resources or memory
+- Network interruptions during upload
+- Partial processing failures
 
 ## Usage
 1. Run the Streamlit application: `streamlit run app.py`
@@ -84,7 +101,9 @@ Processes all PDF files in the specified directory through the following workflo
 - Requires system PATH access to external tools
 
 ## Limitations
-- Currently creates one searchable PDF per page rather than combining pages
-- Limited to English OCR (configurable)
-- Requires external tool installation
-- No batch size limits or memory management for large files
+- Creates separate searchable PDF for each page (by design for better OCR accuracy)
+- English OCR only (configurable via tesseract language parameter)
+- Requires system installation of external tools
+- File size limited to 50MB per PDF
+- No batch processing optimization for very large files
+- Processing time scales linearly with number of pages

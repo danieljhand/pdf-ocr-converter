@@ -7,74 +7,164 @@ import tempfile
 import streamlit as st
 import zipfile
 import io
+import logging
+from PyPDF2 import PdfReader
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configuration constants
+MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+def validate_pdf_file(pdf_file, pdf_name):
+    """
+    Validates uploaded PDF file for size and format.
+    Returns (is_valid, error_message)
+    """
+    try:
+        # Check file size
+        pdf_file.seek(0, 2)  # Seek to end
+        file_size = pdf_file.tell()
+        pdf_file.seek(0)  # Reset to beginning
+        
+        if file_size > MAX_FILE_SIZE_BYTES:
+            return False, f"File size ({file_size / 1024 / 1024:.1f}MB) exceeds limit of {MAX_FILE_SIZE_MB}MB"
+        
+        # Validate PDF format
+        try:
+            pdf_reader = PdfReader(pdf_file)
+            if len(pdf_reader.pages) == 0:
+                return False, "PDF file contains no pages"
+        except Exception as e:
+            return False, f"Invalid PDF format: {str(e)}"
+        finally:
+            pdf_file.seek(0)  # Reset for processing
+        
+        return True, None
+        
+    except Exception as e:
+        logger.error(f"Error validating {pdf_name}: {e}")
+        return False, f"Validation error: {str(e)}"
+
+def check_external_tools():
+    """
+    Checks if required external tools are available.
+    Returns (tools_available, missing_tools)
+    """
+    tools = ['pdftoppm', 'tesseract']
+    missing_tools = []
+    
+    for tool in tools:
+        try:
+            subprocess.run([tool, '--version'], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            missing_tools.append(tool)
+    
+    return len(missing_tools) == 0, missing_tools
 
 def process_single_pdf(pdf_file, pdf_name):
     """
-    Processes a single PDF file:
-    1. Converts each page to a PNG image using pdftoppm.
-    2. Performs OCR on each PNG using tesseract to create searchable PDFs.
-    3. Returns list of processed PDF data with timestamps and UUIDs.
+    Processes a single PDF file with comprehensive error handling.
+    Returns (processed_pdfs, error_message)
     """
     processed_pdfs = []
     
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Validate PDF first
+    is_valid, validation_error = validate_pdf_file(pdf_file, pdf_name)
+    if not is_valid:
+        logger.error(f"Validation failed for {pdf_name}: {validation_error}")
+        return [], validation_error
+    
+    temp_dir = None
+    try:
+        temp_dir = tempfile.mkdtemp()
+        logger.info(f"Processing {pdf_name} in {temp_dir}")
+        
         # Save uploaded file to temporary location
         input_pdf_path = os.path.join(temp_dir, pdf_name)
         with open(input_pdf_path, "wb") as f:
             f.write(pdf_file.getvalue())
         
-        try:
-            # Use current timestamp since we can't get creation time from uploaded file
-            creation_date = datetime.now().strftime("%Y-%m-%d")
+        # Use current timestamp since we can't get creation time from uploaded file
+        creation_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Create a temporary directory for the PNG images
+        temp_image_dir = os.path.join(temp_dir, f"temp_{os.path.splitext(pdf_name)[0]}")
+        os.makedirs(temp_image_dir, exist_ok=True)
+        
+        # Use pdftoppm to convert PDF pages to PNG
+        output_base = os.path.join(temp_image_dir, "page")
+        pdftoppm_command = [
+            "pdftoppm",
+            "-png",
+            input_pdf_path,
+            output_base
+        ]
+        
+        result = subprocess.run(pdftoppm_command, check=True, capture_output=True, text=True)
+        logger.info(f"pdftoppm completed for {pdf_name}")
+        
+        # Check if any PNG files were created
+        png_files = [f for f in os.listdir(temp_image_dir) if f.lower().endswith(".png")]
+        if not png_files:
+            return [], f"No pages could be extracted from {pdf_name}"
+        
+        # Process each PNG image with tesseract
+        for png_file in sorted(png_files):
+            png_path = os.path.join(temp_image_dir, png_file)
+            output_uuid = uuid.uuid4()
+            output_pdf_name = f"{creation_date}-{output_uuid}.pdf"
+            output_pdf_path = os.path.join(temp_dir, output_pdf_name)
             
-            # Create a temporary directory for the PNG images
-            temp_image_dir = os.path.join(temp_dir, f"temp_{os.path.splitext(pdf_name)[0]}")
-            os.makedirs(temp_image_dir, exist_ok=True)
-            
-            # Use pdftoppm to convert PDF pages to PNG
-            output_base = os.path.join(temp_image_dir, "page")
-            pdftoppm_command = [
-                "pdftoppm",
-                "-png",
-                input_pdf_path,
-                output_base
+            tesseract_command = [
+                "tesseract",
+                png_path,
+                os.path.splitext(output_pdf_path)[0],
+                "-l", "eng",
+                "pdf"
             ]
-            subprocess.run(pdftoppm_command, check=True, capture_output=True)
             
-            # Process each PNG image with tesseract
-            for png_file in sorted(os.listdir(temp_image_dir)):
-                if png_file.lower().endswith(".png"):
-                    png_path = os.path.join(temp_image_dir, png_file)
-                    output_uuid = uuid.uuid4()
-                    output_pdf_name = f"{creation_date}-{output_uuid}.pdf"
-                    output_pdf_path = os.path.join(temp_dir, output_pdf_name)
-                    
-                    tesseract_command = [
-                        "tesseract",
-                        png_path,
-                        os.path.splitext(output_pdf_path)[0],
-                        "-l", "eng",
-                        "pdf"
-                    ]
-                    subprocess.run(tesseract_command, check=True, capture_output=True)
-                    
-                    # Read the processed PDF data
-                    with open(output_pdf_path, "rb") as f:
-                        pdf_data = f.read()
-                    
-                    processed_pdfs.append({
-                        'name': output_pdf_name,
-                        'data': pdf_data
-                    })
+            subprocess.run(tesseract_command, check=True, capture_output=True, text=True)
             
-            return processed_pdfs, None
+            # Verify output file was created and has content
+            if not os.path.exists(output_pdf_path) or os.path.getsize(output_pdf_path) == 0:
+                logger.warning(f"OCR failed to create output for {png_file}")
+                continue
             
-        except FileNotFoundError as e:
-            return [], f"Error: {e}. Make sure 'pdftoppm' and 'tesseract' are installed and in your system's PATH."
-        except subprocess.CalledProcessError as e:
-            return [], f"Error processing {pdf_name}: {e.stderr.decode()}"
-        except Exception as e:
-            return [], f"An unexpected error occurred: {e}"
+            # Read the processed PDF data
+            with open(output_pdf_path, "rb") as f:
+                pdf_data = f.read()
+            
+            processed_pdfs.append({
+                'name': output_pdf_name,
+                'data': pdf_data
+            })
+        
+        logger.info(f"Successfully processed {pdf_name}: {len(processed_pdfs)} pages")
+        return processed_pdfs, None
+        
+    except FileNotFoundError as e:
+        error_msg = f"Missing required tool. Please install pdftoppm and tesseract: {str(e)}"
+        logger.error(f"Tool missing for {pdf_name}: {e}")
+        return [], error_msg
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Processing failed: {e.stderr.decode() if e.stderr else str(e)}"
+        logger.error(f"Subprocess error for {pdf_name}: {e}")
+        return [], error_msg
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"Unexpected error processing {pdf_name}: {e}")
+        return [], error_msg
+    finally:
+        # Ensure cleanup happens even on errors
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+                logger.info(f"Cleaned up temporary directory for {pdf_name}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup {temp_dir}: {e}")
 
 def create_zip_archive(processed_pdfs):
     """
@@ -92,20 +182,31 @@ def main():
     st.title("PDF OCR Processing Application")
     st.write("Upload PDF files to convert them into searchable PDFs using OCR")
     
-    # File uploader
+    # File uploader with validation
     uploaded_files = st.file_uploader(
         "Choose PDF files",
         type="pdf",
         accept_multiple_files=True,
-        help="Upload one or more PDF files to process"
+        help=f"Upload PDF files (max {MAX_FILE_SIZE_MB}MB each)"
     )
-    
+
     if uploaded_files:
         st.write(f"Uploaded {len(uploaded_files)} file(s)")
         
-        # Display uploaded files
+        # Check external tools first
+        tools_available, missing_tools = check_external_tools()
+        if not tools_available:
+            st.error(f"Missing required tools: {', '.join(missing_tools)}")
+            st.info("Please install: sudo apt-get install poppler-utils tesseract-ocr (Ubuntu/Debian)")
+            return
+        
+        # Display uploaded files with size info
         for file in uploaded_files:
-            st.write(f"📄 {file.name}")
+            file_size_mb = len(file.getvalue()) / 1024 / 1024
+            if file_size_mb > MAX_FILE_SIZE_MB:
+                st.error(f"📄 {file.name} ({file_size_mb:.1f}MB) - Exceeds size limit")
+            else:
+                st.write(f"📄 {file.name} ({file_size_mb:.1f}MB)")
         
         # Process button
         if st.button("Process PDFs", type="primary"):
