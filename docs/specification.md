@@ -72,7 +72,7 @@ Processes all PDF files in the specified directory through the following workflo
 
 ## Technical Constraints
 - **Input File Size Limit**: 50MB per uploaded PDF file
-- **Output File Size Limit**: Configurable via UI (default 10MB per output PDF)
+- **Output File Size Limit**: Configurable via UI slider (1-19MB range, default 10MB per output PDF)
 - **Supported Formats**: PDF files only (validated before processing)
 - **Memory Usage**: Processes files individually to manage memory
 - **Concurrent Processing**: Single-threaded processing to avoid resource conflicts
@@ -84,8 +84,8 @@ Processes all PDF files in the specified directory through the following workflo
 
 ### Output PDF Size Control
 - **UI Control**: Slider in "Output Settings" section allows users to set maximum output PDF size
-- **Range**: 1MB to 50MB per output PDF
-- **Default**: 10MB per output PDF
+- **Range**: 1MB to 19MB per output PDF (centered design with 10MB default in middle position)
+- **Default**: 10MB per output PDF (positioned at center of slider range)
 - **Behavior**: PDFs exceeding the limit are compressed by:
   - Reducing image resolution (max 1200px dimension)
   - Applying JPEG compression (quality 85)
@@ -97,6 +97,35 @@ Processes all PDF files in the specified directory through the following workflo
 - **Format Conversion**: Uses JPEG compression instead of PNG for smaller file sizes
 - **Quality Control**: JPEG quality set to 85 for good balance of size vs quality
 - **OCR Preservation**: Maintains OCR text overlay accuracy by scaling coordinates proportionally
+
+## User Interface Features
+
+### Progress Tracking
+The application provides detailed, real-time progress updates during PDF processing:
+
+- **File Analysis**: Pre-scans uploaded PDFs to count total pages for accurate progress calculation
+- **Page-Level Progress**: Shows progress for individual pages within multi-page PDFs
+- **Progress Bar**: Visual progress bar with percentage completion based on total pages processed
+- **Status Updates**: Real-time status messages showing current operation:
+  - "Initializing OCR for [filename]..."
+  - "Converting [filename] to images..."
+  - "OCR processing page X/Y of [filename]..."
+  - "Creating searchable PDF for page X/Y of [filename]..."
+  - "Completed page X/Y of [filename]"
+- **Error Reporting**: Individual page/file errors displayed without stopping batch processing
+- **Completion Summary**: Final status showing total searchable PDFs created
+
+### Progress Display Components
+- **Overall Progress Bar**: Shows percentage completion across all files and pages
+- **Status Text**: Current overall progress (e.g., "Progress: 15/23 pages processed (65.2%)")
+- **Detail Text**: Specific operation being performed on current file/page
+- **Success/Error Indicators**: Visual feedback with emojis (✅ for success, ❌ for errors)
+
+### Output Settings Interface
+- **Size Control Slider**: Horizontally centered slider with 10MB default value
+- **Range Display**: Shows 1MB minimum to 19MB maximum with 1MB increments
+- **Help Text**: Explains trade-off between file size and image quality
+- **Real-time Feedback**: Shows selected size limit below slider
 
 ## Error Handling
 - **Input Validation**: Validates uploaded files are proper PDFs before processing
@@ -118,7 +147,7 @@ Processes all PDF files in the specified directory through the following workflo
 1. Run the Streamlit application: `streamlit run app.py`
 2. Open the web interface in your browser (typically http://localhost:8501)
 3. Upload one or more PDF files using the file uploader
-4. Configure maximum output PDF size using the slider (1-50MB, default 10MB)
+4. Configure maximum output PDF size using the slider (1-19MB, default 10MB centered)
 5. Click "Process PDFs" to start OCR processing
 6. Download the processed searchable PDFs individually or as a ZIP archive when complete
 
