@@ -20,6 +20,7 @@ This application processes PDF files by converting them to searchable PDFs using
 - `uuid`: Generate unique identifiers
 - `datetime`: Handle timestamps
 - `shutil`: File operations (cleanup)
+- `streamlit`: Web application framework for the user interface
 
 ## Functionality
 
@@ -50,13 +51,15 @@ Processes all PDF files in the specified directory through the following workflo
 ## Input/Output
 
 ### Input
-- Directory path containing PDF files
+- PDF files uploaded through Streamlit web interface
+- Multiple file upload supported
 - PDF files with any naming convention
 
 ### Output
-- Searchable PDF files in the same directory
+- Searchable PDF files available for download
 - Naming format: `YYYY-MM-DD-[UUID].pdf`
-- Original PDF files remain unchanged
+- Individual download buttons for each processed file
+- Original PDF files are not modified
 
 ## Error Handling
 - **FileNotFoundError**: Missing external tools (pdftoppm, tesseract)
@@ -65,12 +68,16 @@ Processes all PDF files in the specified directory through the following workflo
 - All errors are logged with descriptive messages
 
 ## Usage
-1. Run the application: `python app.py`
-2. Enter the directory path containing PDF files when prompted
-3. Application processes all PDFs automatically
-4. Completion message displayed when finished
+1. Run the Streamlit application: `streamlit run app.py`
+2. Open the web interface in your browser (typically http://localhost:8501)
+3. Upload one or more PDF files using the file uploader
+4. Click "Process PDFs" to start OCR processing
+5. Download the processed searchable PDFs individually when complete
 
 ## Technical Notes
+- Streamlit session state manages uploaded files and processing results
+- Temporary files are stored in system temp directory during processing
+- Download functionality uses Streamlit's download_button component
 - Temporary directories use format: `temp_[original_filename_without_extension]`
 - Each PDF page generates a separate searchable PDF (current implementation)
 - OCR language can be modified by changing the `-l eng` parameter
