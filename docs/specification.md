@@ -59,14 +59,35 @@ Processes all PDF files in the specified directory through the following workflo
 - Searchable PDF files available for download
 - Naming format: `YYYY-MM-DD-[UUID].pdf`
 - Individual download buttons for each processed file
+- ZIP archive download for all processed files
+- **File Size Control**: Output PDFs compressed to stay under user-specified size limit
 - Original PDF files are not modified
 
 ## Technical Constraints
-- **File Size Limit**: 50MB per PDF file
+- **Input File Size Limit**: 50MB per uploaded PDF file
+- **Output File Size Limit**: Configurable via UI (default 10MB per output PDF)
 - **Supported Formats**: PDF files only (validated before processing)
 - **Memory Usage**: Processes files individually to manage memory
 - **Concurrent Processing**: Single-threaded processing to avoid resource conflicts
 - **Temporary Storage**: Uses system temp directory with automatic cleanup
+
+## Configuration Options
+
+### Output PDF Size Control
+- **UI Control**: Slider in "Output Settings" section allows users to set maximum output PDF size
+- **Range**: 1MB to 50MB per output PDF
+- **Default**: 10MB per output PDF
+- **Behavior**: PDFs exceeding the limit are compressed by:
+  - Reducing image resolution (max 1200px dimension)
+  - Applying JPEG compression (quality 85)
+  - Converting RGBA images to RGB for better compression
+  - Scaling OCR coordinates to match resized images
+
+### Compression Strategy
+- **Image Optimization**: Automatically resizes images if width or height exceeds 1200px
+- **Format Conversion**: Uses JPEG compression instead of PNG for smaller file sizes
+- **Quality Control**: JPEG quality set to 85 for good balance of size vs quality
+- **OCR Preservation**: Maintains OCR text overlay accuracy by scaling coordinates proportionally
 
 ## Error Handling
 - **Input Validation**: Validates uploaded files are proper PDFs before processing
@@ -88,8 +109,9 @@ Processes all PDF files in the specified directory through the following workflo
 1. Run the Streamlit application: `streamlit run app.py`
 2. Open the web interface in your browser (typically http://localhost:8501)
 3. Upload one or more PDF files using the file uploader
-4. Click "Process PDFs" to start OCR processing
-5. Download the processed searchable PDFs individually when complete
+4. Configure maximum output PDF size using the slider (1-50MB, default 10MB)
+5. Click "Process PDFs" to start OCR processing
+6. Download the processed searchable PDFs individually or as a ZIP archive when complete
 
 ## Technical Notes
 - Streamlit session state manages uploaded files and processing results
@@ -99,11 +121,13 @@ Processes all PDF files in the specified directory through the following workflo
 - Each PDF page generates a separate searchable PDF (current implementation)
 - OCR language can be modified by changing the `-l eng` parameter
 - Requires system PATH access to external tools
+- Output PDF size is controlled through image compression and resizing while preserving OCR accuracy
 
 ## Limitations
 - Creates separate searchable PDF for each page (by design for better OCR accuracy)
 - English OCR only (configurable via tesseract language parameter)
 - Requires system installation of external tools
-- File size limited to 50MB per PDF
+- Input file size limited to 50MB per uploaded PDF
+- Output file size configurable (1-50MB) with automatic compression applied
 - No batch processing optimization for very large files
 - Processing time scales linearly with number of pages
