@@ -134,6 +134,13 @@ Processes all PDF files in the specified directory through the following workflo
 - Requires system PATH access to external tools
 - Output PDF size is controlled through image compression and resizing while preserving OCR accuracy
 
+## Performance Optimization
+- **GPU Detection**: Automatically detects CUDA-capable GPUs for accelerated OCR processing
+- **CPU Fallback**: Gracefully falls back to CPU processing when GPU is unavailable
+- **Memory Management**: Processes images in-memory without temporary image files
+- **Confidence Filtering**: Only includes high-confidence OCR results (>50%) in searchable text
+- **Image Quality**: Uses 300 DPI conversion for optimal OCR accuracy
+
 ## Limitations
 - Creates separate searchable PDF for each page (by design for better OCR accuracy)
 - English OCR only (configurable via tesseract language parameter)
