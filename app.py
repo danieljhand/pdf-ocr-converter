@@ -1,5 +1,4 @@
 import os
-import subprocess
 import uuid
 from datetime import datetime
 import shutil
@@ -8,8 +7,12 @@ import streamlit as st
 import zipfile
 import io
 import logging
-import platform
+import easyocr
+from pdf2image import convert_from_bytes
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader
+import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,29 +54,60 @@ def validate_pdf_file(pdf_file, pdf_name):
 
 def check_external_tools():
     """
-    Checks if required external tools are available.
+    Checks if required Python libraries are available.
     Returns (tools_available, missing_tools)
     """
-    tools_config = {
-        'pdftoppm': ['pdftoppm', '-h'],  # Use -h instead of --version
-        'tesseract': ['tesseract', '--version']
-    }
     missing_tools = []
     
-    for tool_name, command in tools_config.items():
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
-            # Accept both success (0) and help exit codes (1) for pdftoppm
-            if result.returncode not in [0, 1]:
-                missing_tools.append(tool_name)
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            missing_tools.append(tool_name)
+    try:
+        import easyocr
+    except ImportError:
+        missing_tools.append('easyocr')
+    
+    try:
+        from pdf2image import convert_from_bytes
+    except ImportError:
+        missing_tools.append('pdf2image')
     
     return len(missing_tools) == 0, missing_tools
 
+def create_searchable_pdf(image, ocr_results, output_path):
+    """
+    Creates a searchable PDF with the original image and OCR text overlay.
+    """
+    # Get image dimensions
+    img_width, img_height = image.size
+    
+    # Create PDF with image dimensions
+    c = canvas.Canvas(output_path, pagesize=(img_width, img_height))
+    
+    # Add the original image as background
+    img_reader = ImageReader(image)
+    c.drawImage(img_reader, 0, 0, width=img_width, height=img_height)
+    
+    # Add invisible OCR text overlay
+    for (bbox, text, confidence) in ocr_results:
+        if confidence > 0.5:  # Only include text with reasonable confidence
+            # EasyOCR returns bbox as [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+            x1, y1 = bbox[0]
+            x3, y3 = bbox[2]
+            
+            # Convert coordinates (EasyOCR uses top-left origin, ReportLab uses bottom-left)
+            x = x1
+            y = img_height - y3
+            width = x3 - x1
+            height = y3 - y1
+            
+            # Add invisible text
+            c.setFillColorRGB(0, 0, 0, alpha=0)  # Transparent text
+            c.setFont("Helvetica", max(8, height * 0.8))  # Scale font to text height
+            c.drawString(x, y, text)
+    
+    c.save()
+
 def process_single_pdf(pdf_file, pdf_name):
     """
-    Processes a single PDF file with comprehensive error handling.
+    Processes a single PDF file using pure Python libraries.
     Returns (processed_pdfs, error_message)
     """
     processed_pdfs = []
@@ -85,80 +119,67 @@ def process_single_pdf(pdf_file, pdf_name):
         return [], validation_error
     
     temp_dir = None
+    reader = None
+    
     try:
         temp_dir = tempfile.mkdtemp()
         logger.info(f"Processing {pdf_name} in {temp_dir}")
         
-        # Save uploaded file to temporary location
-        input_pdf_path = os.path.join(temp_dir, pdf_name)
-        with open(input_pdf_path, "wb") as f:
-            f.write(pdf_file.getvalue())
+        # Initialize EasyOCR reader (this may take time on first run)
+        if reader is None:
+            reader = easyocr.Reader(['en'], gpu=False)  # Use CPU only for compatibility
+        
+        # Convert PDF to images using pdf2image
+        pdf_file.seek(0)
+        images = convert_from_bytes(pdf_file.getvalue(), dpi=300)
+        
+        if not images:
+            return [], f"No pages could be extracted from {pdf_name}"
         
         # Use current timestamp since we can't get creation time from uploaded file
         creation_date = datetime.now().strftime("%Y-%m-%d")
         
-        # Create a temporary directory for the PNG images
-        temp_image_dir = os.path.join(temp_dir, f"temp_{os.path.splitext(pdf_name)[0]}")
-        os.makedirs(temp_image_dir, exist_ok=True)
-        
-        # Use pdftoppm to convert PDF pages to PNG
-        output_base = os.path.join(temp_image_dir, "page")
-        pdftoppm_command = [
-            "pdftoppm",
-            "-png",
-            input_pdf_path,
-            output_base
-        ]
-        
-        result = subprocess.run(pdftoppm_command, check=True, capture_output=True, text=True)
-        logger.info(f"pdftoppm completed for {pdf_name}")
-        
-        # Check if any PNG files were created
-        png_files = [f for f in os.listdir(temp_image_dir) if f.lower().endswith(".png")]
-        if not png_files:
-            return [], f"No pages could be extracted from {pdf_name}"
-        
-        # Process each PNG image with tesseract
-        for png_file in sorted(png_files):
-            png_path = os.path.join(temp_image_dir, png_file)
-            output_uuid = uuid.uuid4()
-            output_pdf_name = f"{creation_date}-{output_uuid}.pdf"
-            output_pdf_path = os.path.join(temp_dir, output_pdf_name)
-            
-            tesseract_command = [
-                "tesseract",
-                png_path,
-                os.path.splitext(output_pdf_path)[0],
-                "-l", "eng",
-                "pdf"
-            ]
-            
-            subprocess.run(tesseract_command, check=True, capture_output=True, text=True)
-            
-            # Verify output file was created and has content
-            if not os.path.exists(output_pdf_path) or os.path.getsize(output_pdf_path) == 0:
-                logger.warning(f"OCR failed to create output for {png_file}")
+        # Process each page image with EasyOCR
+        for page_num, image in enumerate(images, 1):
+            try:
+                # Convert PIL image to numpy array for EasyOCR
+                img_array = np.array(image)
+                
+                # Perform OCR
+                ocr_results = reader.readtext(img_array)
+                
+                # Create searchable PDF with OCR text
+                output_uuid = uuid.uuid4()
+                output_pdf_name = f"{creation_date}-{output_uuid}.pdf"
+                output_pdf_path = os.path.join(temp_dir, output_pdf_name)
+                
+                # Create PDF with original image and OCR text overlay
+                create_searchable_pdf(image, ocr_results, output_pdf_path)
+                
+                # Verify output file was created and has content
+                if not os.path.exists(output_pdf_path) or os.path.getsize(output_pdf_path) == 0:
+                    logger.warning(f"OCR failed to create output for page {page_num}")
+                    continue
+                
+                # Read the processed PDF data
+                with open(output_pdf_path, "rb") as f:
+                    pdf_data = f.read()
+                
+                processed_pdfs.append({
+                    'name': output_pdf_name,
+                    'data': pdf_data
+                })
+                
+            except Exception as e:
+                logger.warning(f"Failed to process page {page_num} of {pdf_name}: {e}")
                 continue
-            
-            # Read the processed PDF data
-            with open(output_pdf_path, "rb") as f:
-                pdf_data = f.read()
-            
-            processed_pdfs.append({
-                'name': output_pdf_name,
-                'data': pdf_data
-            })
         
         logger.info(f"Successfully processed {pdf_name}: {len(processed_pdfs)} pages")
         return processed_pdfs, None
         
-    except FileNotFoundError as e:
-        error_msg = f"Missing required tool. Please install pdftoppm and tesseract: {str(e)}"
-        logger.error(f"Tool missing for {pdf_name}: {e}")
-        return [], error_msg
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Processing failed: {e.stderr.decode() if e.stderr else str(e)}"
-        logger.error(f"Subprocess error for {pdf_name}: {e}")
+    except ImportError as e:
+        error_msg = f"Missing required Python library: {str(e)}"
+        logger.error(f"Import error for {pdf_name}: {e}")
         return [], error_msg
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
@@ -203,23 +224,9 @@ def main():
         # Check external tools first
         tools_available, missing_tools = check_external_tools()
         if not tools_available:
-            st.error(f"Missing required tools: {', '.join(missing_tools)}")
-            
-            # Platform-specific installation instructions
-            system = platform.system().lower()
-            
-            if system == "darwin":  # macOS
-                st.info("**macOS Installation:**")
-                st.code("brew install poppler tesseract")
-            elif system == "linux":
-                st.info("**Linux Installation:**")
-                st.code("sudo apt-get install poppler-utils tesseract-ocr  # Ubuntu/Debian")
-                st.code("sudo yum install poppler-utils tesseract        # RHEL/CentOS")
-            else:
-                st.info("**Installation required:**")
-                st.write("- **poppler-utils** (for pdftoppm)")
-                st.write("- **tesseract-ocr** (for OCR processing)")
-            
+            st.error(f"Missing required Python libraries: {', '.join(missing_tools)}")
+            st.info("**Installation:**")
+            st.code("pip install easyocr pdf2image reportlab")
             return
         
         # Display uploaded files with size info
