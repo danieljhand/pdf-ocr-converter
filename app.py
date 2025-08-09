@@ -200,7 +200,13 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
         test_size = create_pdf_with_image(test_image, ocr_results, temp_output)
         
         if test_size <= max_size_bytes:
+            # Cache the successful JPEG compression settings
+            create_searchable_pdf._last_compression_settings = {
+                'method': 'jpeg_only',
+                'jpeg_quality': quality
+            }
             logger.info(f"Achieved target size with JPEG quality {quality}: {test_size / 1024 / 1024:.1f}MB")
+            logger.info(f"Cached compression settings: JPEG quality {quality}")
             os.rename(temp_output, output_path)
             return
         
@@ -251,7 +257,14 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
         test_size = create_pdf_with_image(compressed_image, scaled_ocr_results, temp_output)
         
         if test_size <= max_size_bytes:
+            # Cache the successful resize + JPEG compression settings
+            create_searchable_pdf._last_compression_settings = {
+                'method': 'resize_and_jpeg',
+                'resize_factor': resize_factor,
+                'jpeg_quality': 75
+            }
             logger.info(f"Achieved target size with {resize_factor*100:.0f}% resize: {test_size / 1024 / 1024:.1f}MB")
+            logger.info(f"Cached compression settings: {resize_factor*100:.0f}% resize + JPEG quality 75")
             os.rename(temp_output, output_path)
             return
         
@@ -261,7 +274,34 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
     logger.warning(f"Could not achieve target size, using maximum compression: {test_size / 1024 / 1024:.1f}MB")
     os.rename(temp_output, output_path)
     
-    # Move temp file to final location
+    # Cache the compression settings for subsequent pages
+    if file_size <= max_size_bytes:
+        # No compression was needed
+        create_searchable_pdf._last_compression_settings = {
+            'method': 'no_compression'
+        }
+        logger.info("Cached compression settings: no compression needed")
+        os.rename(temp_output, output_path)
+        return
+    
+    # If we get here, use the last compressed version (it's the best we can do)
+    logger.warning(f"Could not achieve target size, using maximum compression: {test_size / 1024 / 1024:.1f}MB")
+    
+    # Cache the final compression settings used
+    if 'resize_factor' in locals():
+        create_searchable_pdf._last_compression_settings = {
+            'method': 'resize_and_jpeg',
+            'resize_factor': resize_factor,
+            'jpeg_quality': 75
+        }
+        logger.info(f"Cached compression settings: {resize_factor*100:.0f}% resize + JPEG quality 75")
+    else:
+        create_searchable_pdf._last_compression_settings = {
+            'method': 'jpeg_only',
+            'jpeg_quality': 60  # Last quality tried
+        }
+        logger.info("Cached compression settings: JPEG quality 60")
+    
     os.rename(temp_output, output_path)
     
     final_size = os.path.getsize(output_path)
@@ -348,6 +388,8 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
         creation_date = datetime.now().strftime("%Y-%m-%d")
         
         # Process each page image with EasyOCR
+        compression_settings = None  # Cache for optimal compression settings
+        
         for page_num, image in enumerate(images, 1):
             try:
                 if progress_callback:
@@ -367,8 +409,15 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
                 output_pdf_name = f"{creation_date}-{output_uuid}.pdf"
                 output_pdf_path = os.path.join(temp_dir, output_pdf_name)
                 
-                # Create PDF with original image and OCR text overlay
-                create_searchable_pdf(image, ocr_results, output_pdf_path, max_size_mb=max_output_size_mb)
+                # Create PDF with cached compression settings for pages after the first
+                if page_num == 1:
+                    # First page: find optimal compression and cache it
+                    create_searchable_pdf(image, ocr_results, output_pdf_path, max_size_mb=max_output_size_mb)
+                    # Extract compression settings from the first page processing
+                    compression_settings = getattr(create_searchable_pdf, '_last_compression_settings', None)
+                else:
+                    # Subsequent pages: use cached compression settings
+                    create_searchable_pdf_with_settings(image, ocr_results, output_pdf_path, max_size_mb=max_output_size_mb, compression_settings=compression_settings)
                 
                 # Verify output file was created and has content
                 if not os.path.exists(output_pdf_path) or os.path.getsize(output_pdf_path) == 0:
