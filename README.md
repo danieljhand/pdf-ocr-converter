@@ -7,7 +7,8 @@ A Streamlit-based web application that converts non-searchable PDF files into se
 - 🔍 **OCR Processing**: Convert non-searchable PDFs to searchable PDFs with invisible text overlay
 - 🚀 **GPU Acceleration**: Automatic GPU detection and acceleration when available
 - 📁 **Batch Processing**: Upload and process multiple PDF files simultaneously
-- 📏 **Size Control**: Configurable output PDF size limits (1-50MB) with automatic compression
+- 📏 **Size Control**: Configurable output PDF size limits (1-19MB) with automatic compression
+- 📊 **Enhanced Progress Tracking**: Real-time page-level progress updates with detailed status messages
 - 💾 **Flexible Downloads**: Download individual files or all files as a ZIP archive
 - 🌐 **Web Interface**: User-friendly Streamlit web interface
 - 🧹 **Auto Cleanup**: Automatic temporary file cleanup
@@ -42,7 +43,7 @@ streamlit run app.py
 ## Usage
 
 1. **Upload PDFs**: Select one or more PDF files (max 50MB each)
-2. **Configure Settings**: Adjust maximum output PDF size (1-50MB, default 10MB)
+2. **Configure Settings**: Adjust maximum output PDF size (1-19MB, default 10MB centered on slider)
 3. **Process**: Click "Process PDFs" to start OCR processing
 4. **Download**: Download individual searchable PDFs or all files as ZIP
 
@@ -56,14 +57,27 @@ streamlit run app.py
 ### Output Features
 - **Format**: Searchable PDF with invisible OCR text overlay
 - **Naming**: `YYYY-MM-DD-[UUID].pdf` format
-- **Size Control**: Configurable compression (1-50MB limit)
+- **Size Control**: Configurable compression (1-19MB limit, centered slider design)
 - **Quality**: 300 DPI processing for optimal OCR accuracy
+- **Progress Tracking**: Real-time page-level progress with detailed status updates
 
 ### Performance
 - **OCR Engine**: EasyOCR with English language support
 - **GPU Support**: Automatic CUDA detection and acceleration
 - **CPU Fallback**: Graceful fallback when GPU unavailable
 - **Confidence Filtering**: Only includes OCR text with >50% confidence
+
+### Progress Tracking
+- **Page-Level Updates**: Shows progress for individual pages within multi-page PDFs
+- **Real-Time Status**: Detailed messages for each processing step
+- **Accurate Progress Bar**: Pre-scans files to calculate total pages for precise completion percentage
+- **Visual Feedback**: Success/error indicators with emojis (✅/❌)
+- **Status Messages**: 
+  - "Initializing OCR for [filename]..."
+  - "Converting [filename] to images..."
+  - "OCR processing page X/Y of [filename]..."
+  - "Creating searchable PDF for page X/Y of [filename]..."
+  - "Completed page X/Y of [filename]"
 
 ## Dependencies
 
@@ -87,10 +101,12 @@ streamlit run app.py
 ### Output PDF Size Control
 The application automatically compresses output PDFs to stay within the specified size limit:
 
+- **Slider Range**: 1-19MB with 10MB default positioned at center for intuitive control
 - **Image Resizing**: Reduces resolution when images exceed 1200px
-- **JPEG Compression**: Applies 85% quality JPEG compression
+- **JPEG Compression**: Applies 85% quality JPEG compression (70% for aggressive compression)
 - **Format Optimization**: Converts RGBA to RGB for better compression
 - **OCR Preservation**: Maintains text overlay accuracy through coordinate scaling
+- **Progressive Compression**: Applies moderate compression first, then more aggressive if needed
 
 ### GPU Acceleration
 - **Automatic Detection**: Detects CUDA-capable GPUs automatically
@@ -138,6 +154,23 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 2. **Reduce output size limit** for faster compression
 3. **Process smaller batches** to avoid memory issues
 4. **Ensure good input quality** for better OCR results
+
+### Progress and Performance Issues
+
+**Progress bar not updating smoothly:**
+- Large PDFs may show longer pauses between updates
+- Each page processes individually for accurate tracking
+- GPU acceleration significantly improves processing speed
+
+**Processing seems slow:**
+- Check if GPU acceleration is being used (shown in UI)
+- Reduce output PDF size limit for faster compression
+- Consider processing fewer files simultaneously
+
+**Progress percentage jumps:**
+- Normal behavior when files have different page counts
+- Progress is calculated based on total pages across all files
+- Individual file completion may cause larger jumps
 
 ## File Structure
 
