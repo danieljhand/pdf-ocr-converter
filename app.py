@@ -411,7 +411,7 @@ def main():
         max_output_size = st.slider(
             "Maximum output PDF size (MB)",
             min_value=1,
-            max_value=50,
+            max_value=19,
             value=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB,
             step=1,
             help="Larger sizes preserve more image quality but create bigger files. Smaller sizes compress images more aggressively."
