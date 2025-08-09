@@ -28,6 +28,10 @@ try:
 except ImportError:
     pass
 
+# Configure PIL to handle large images safely
+from PIL import Image as PILImage
+PILImage.MAX_IMAGE_PIXELS = None  # Remove the limit, but we'll add our own checks
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,6 +123,19 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
     """
     from PIL import Image as PILImage
     import io
+    
+    # Check image dimensions and reduce if too large
+    max_pixels = 50_000_000  # 50 megapixels - reasonable limit
+    current_pixels = image.size[0] * image.size[1]
+    
+    if current_pixels > max_pixels:
+        logger.info(f"Image too large ({current_pixels:,} pixels), resizing for safety...")
+        # Calculate scale factor to reduce to max_pixels
+        scale_factor = (max_pixels / current_pixels) ** 0.5
+        new_width = int(image.size[0] * scale_factor)
+        new_height = int(image.size[1] * scale_factor)
+        image = image.resize((new_width, new_height), PILImage.LANCZOS)
+        logger.info(f"Resized to {new_width}x{new_height} ({new_width * new_height:,} pixels)")
     
     max_size_bytes = max_size_mb * 1024 * 1024
     
@@ -290,10 +307,38 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
         
         # Convert PDF to images using pdf2image
         pdf_file.seek(0)
-        images = convert_from_bytes(pdf_file.getvalue(), dpi=300)
+        file_size_mb = len(pdf_file.getvalue()) / 1024 / 1024
+        
+        # Use lower DPI for larger files to prevent memory issues
+        if file_size_mb > 20:
+            dpi = 200  # Lower DPI for large files
+        elif file_size_mb > 10:
+            dpi = 250  # Medium DPI for medium files
+        else:
+            dpi = 300  # Full DPI for smaller files
+            
+        logger.info(f"Converting {pdf_name} ({file_size_mb:.1f}MB) at {dpi} DPI")
+        images = convert_from_bytes(pdf_file.getvalue(), dpi=dpi)
         
         if not images:
             return [], f"No pages could be extracted from {pdf_name}"
+        
+        # Check and resize images if they're too large
+        max_pixels = 50_000_000  # 50 megapixels
+        processed_images = []
+        
+        for i, image in enumerate(images):
+            current_pixels = image.size[0] * image.size[1]
+            if current_pixels > max_pixels:
+                logger.info(f"Page {i+1} too large ({current_pixels:,} pixels), resizing...")
+                scale_factor = (max_pixels / current_pixels) ** 0.5
+                new_width = int(image.size[0] * scale_factor)
+                new_height = int(image.size[1] * scale_factor)
+                image = image.resize((new_width, new_height), PILImage.LANCZOS)
+                logger.info(f"Page {i+1} resized to {new_width}x{new_height}")
+            processed_images.append(image)
+        
+        images = processed_images  # Use the processed images
         
         total_pages = len(images)
         if progress_callback:
