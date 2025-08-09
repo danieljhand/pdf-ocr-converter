@@ -245,7 +245,7 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
     final_size = os.path.getsize(output_path)
     logger.info(f"Final PDF size: {final_size / 1024 / 1024:.1f}MB")
 
-def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB):
+def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB, progress_callback=None):
     """
     Processes a single PDF file using pure Python libraries.
     Returns (processed_pdfs, error_message)
@@ -265,6 +265,9 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
         temp_dir = tempfile.mkdtemp()
         logger.info(f"Processing {pdf_name} in {temp_dir}")
         
+        if progress_callback:
+            progress_callback(f"Initializing OCR for {pdf_name}...")
+        
         # Initialize EasyOCR reader with GPU detection
         if reader is None:
             gpu_available, gpu_info = check_gpu_availability()
@@ -277,6 +280,9 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
                 st.info(f"💻 Using CPU processing: {gpu_info}")
                 reader = easyocr.Reader(['en'], gpu=False)
         
+        if progress_callback:
+            progress_callback(f"Converting {pdf_name} to images...")
+        
         # Convert PDF to images using pdf2image
         pdf_file.seek(0)
         images = convert_from_bytes(pdf_file.getvalue(), dpi=300)
@@ -284,17 +290,27 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
         if not images:
             return [], f"No pages could be extracted from {pdf_name}"
         
+        total_pages = len(images)
+        if progress_callback:
+            progress_callback(f"Processing {total_pages} pages from {pdf_name}...")
+        
         # Use current timestamp since we can't get creation time from uploaded file
         creation_date = datetime.now().strftime("%Y-%m-%d")
         
         # Process each page image with EasyOCR
         for page_num, image in enumerate(images, 1):
             try:
+                if progress_callback:
+                    progress_callback(f"OCR processing page {page_num}/{total_pages} of {pdf_name}...")
+                
                 # Convert PIL image to numpy array for EasyOCR
                 img_array = np.array(image)
                 
                 # Perform OCR
                 ocr_results = reader.readtext(img_array)
+                
+                if progress_callback:
+                    progress_callback(f"Creating searchable PDF for page {page_num}/{total_pages} of {pdf_name}...")
                 
                 # Create searchable PDF with OCR text
                 output_uuid = uuid.uuid4()
@@ -318,8 +334,13 @@ def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT
                     'data': pdf_data
                 })
                 
+                if progress_callback:
+                    progress_callback(f"Completed page {page_num}/{total_pages} of {pdf_name}")
+                
             except Exception as e:
                 logger.warning(f"Failed to process page {page_num} of {pdf_name}: {e}")
+                if progress_callback:
+                    progress_callback(f"Error on page {page_num}/{total_pages} of {pdf_name}: {str(e)}")
                 continue
         
         logger.info(f"Successfully processed {pdf_name}: {len(processed_pdfs)} pages")
@@ -414,27 +435,69 @@ def main():
             
             st.session_state.processed_results = []
             
-            # Progress bar
+            # Enhanced progress tracking
             progress_bar = st.progress(0)
             status_text = st.empty()
+            detail_text = st.empty()
             
+            # Calculate total pages for more accurate progress
             total_files = len(uploaded_files)
+            total_pages = 0
+            file_page_counts = {}
+            
+            # First pass: count pages in each PDF for accurate progress
+            status_text.text("Analyzing uploaded files...")
+            for uploaded_file in uploaded_files:
+                try:
+                    uploaded_file.seek(0)
+                    pdf_reader = PdfReader(uploaded_file)
+                    page_count = len(pdf_reader.pages)
+                    file_page_counts[uploaded_file.name] = page_count
+                    total_pages += page_count
+                    uploaded_file.seek(0)  # Reset for processing
+                except Exception as e:
+                    file_page_counts[uploaded_file.name] = 1  # Assume 1 page if can't read
+                    total_pages += 1
+            
+            processed_pages = 0
+            
+            def update_progress(message):
+                """Callback function to update progress display"""
+                nonlocal processed_pages
+                detail_text.text(message)
+                
+                # Increment page counter for certain operations
+                if "Completed page" in message:
+                    processed_pages += 1
+                    progress = min(processed_pages / total_pages, 1.0)
+                    progress_bar.progress(progress)
+                    status_text.text(f"Progress: {processed_pages}/{total_pages} pages processed ({progress*100:.1f}%)")
+            
+            status_text.text(f"Processing {total_files} files ({total_pages} total pages)...")
             
             for i, uploaded_file in enumerate(uploaded_files):
-                status_text.text(f"Processing {uploaded_file.name}...")
+                file_pages = file_page_counts.get(uploaded_file.name, 1)
+                update_progress(f"Starting {uploaded_file.name} ({file_pages} pages)...")
                 
-                processed_pdfs, error = process_single_pdf(uploaded_file, uploaded_file.name, max_output_size_mb=max_output_size)
+                processed_pdfs, error = process_single_pdf(
+                    uploaded_file, 
+                    uploaded_file.name, 
+                    max_output_size_mb=max_output_size,
+                    progress_callback=update_progress
+                )
                 
                 if error:
                     st.error(f"Error processing {uploaded_file.name}: {error}")
+                    detail_text.text(f"❌ Failed: {uploaded_file.name}")
                 else:
                     st.session_state.processed_results.extend(processed_pdfs)
-                    st.success(f"Successfully processed {uploaded_file.name} - Created {len(processed_pdfs)} searchable PDF(s)")
-                
-                # Update progress
-                progress_bar.progress((i + 1) / total_files)
+                    st.success(f"✅ Successfully processed {uploaded_file.name} - Created {len(processed_pdfs)} searchable PDF(s)")
+                    detail_text.text(f"✅ Completed: {uploaded_file.name}")
             
-            status_text.text("Processing complete!")
+            # Final progress update
+            progress_bar.progress(1.0)
+            status_text.text(f"🎉 Processing complete! Created {len(st.session_state.processed_results)} searchable PDFs")
+            detail_text.text("All files processed successfully!")
     
     # Display download buttons for processed files
     if 'processed_results' in st.session_state and st.session_state.processed_results:
