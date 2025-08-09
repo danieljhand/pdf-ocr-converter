@@ -163,15 +163,8 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
     # File is too large, need to compress
     logger.info(f"PDF size ({file_size / 1024 / 1024:.1f}MB) exceeds limit ({max_size_mb}MB), compressing...")
     
-    # Calculate compression needed
-    compression_ratio = max_size_bytes / file_size
-    target_dimension = int(max(image.size) * (compression_ratio ** 0.5))
-    target_dimension = min(target_dimension, 1200)  # Cap at 1200px
-    
-    # Resize image while maintaining aspect ratio
+    # Start with conservative compression - try JPEG quality reduction first
     compressed_image = image.copy()
-    if max(compressed_image.size) > target_dimension:
-        compressed_image.thumbnail((target_dimension, target_dimension), PILImage.LANCZOS)
     
     # Convert to RGB if RGBA for better compression
     if compressed_image.mode == 'RGBA':
@@ -179,51 +172,51 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
         rgb_image.paste(compressed_image, mask=compressed_image.split()[-1])
         compressed_image = rgb_image
     
-    # Apply JPEG compression
-    jpeg_buffer = io.BytesIO()
-    compressed_image.save(jpeg_buffer, format='JPEG', quality=85, optimize=True)
-    jpeg_buffer.seek(0)
-    compressed_image = PILImage.open(jpeg_buffer)
-    
-    # Scale OCR coordinates to match resized image
-    original_width, original_height = image.size
-    new_width, new_height = compressed_image.size
-    width_scale = new_width / original_width
-    height_scale = new_height / original_height
-    
-    scaled_ocr_results = []
-    for (bbox, text, confidence) in ocr_results:
-        scaled_bbox = []
-        for point in bbox:
-            scaled_x = point[0] * width_scale
-            scaled_y = point[1] * height_scale
-            scaled_bbox.append([scaled_x, scaled_y])
-        scaled_ocr_results.append((scaled_bbox, text, confidence))
-    
-    # Create PDF with compressed image
-    compressed_size = create_pdf_with_image(compressed_image, scaled_ocr_results, temp_output)
-    
-    # If still too large, try more aggressive compression
-    if compressed_size > max_size_bytes:
-        logger.info(f"Still too large ({compressed_size / 1024 / 1024:.1f}MB), applying more compression...")
+    # Try different JPEG quality levels before resizing
+    for quality in [90, 80, 70, 60]:
+        jpeg_buffer = io.BytesIO()
+        compressed_image.save(jpeg_buffer, format='JPEG', quality=quality, optimize=True)
+        jpeg_buffer.seek(0)
+        test_image = PILImage.open(jpeg_buffer)
         
-        # More aggressive resizing
-        target_dimension = int(target_dimension * 0.7)
+        # Test PDF size with this compression
+        test_size = create_pdf_with_image(test_image, ocr_results, temp_output)
+        
+        if test_size <= max_size_bytes:
+            logger.info(f"Achieved target size with JPEG quality {quality}: {test_size / 1024 / 1024:.1f}MB")
+            os.rename(temp_output, output_path)
+            return
+        
+        logger.info(f"JPEG quality {quality} still too large: {test_size / 1024 / 1024:.1f}MB")
+    
+    # If JPEG compression alone isn't enough, try gradual resizing
+    original_width, original_height = image.size
+    max_dimension = max(original_width, original_height)
+    
+    # Try different resize levels
+    for resize_factor in [0.9, 0.8, 0.7, 0.6, 0.5]:
+        target_dimension = int(max_dimension * resize_factor)
+        
+        # Don't go below reasonable resolution
+        if target_dimension < 600:
+            break
+            
         compressed_image = image.copy()
         compressed_image.thumbnail((target_dimension, target_dimension), PILImage.LANCZOS)
         
+        # Convert to RGB if needed
         if compressed_image.mode == 'RGBA':
             rgb_image = PILImage.new('RGB', compressed_image.size, (255, 255, 255))
             rgb_image.paste(compressed_image, mask=compressed_image.split()[-1])
             compressed_image = rgb_image
         
-        # Lower JPEG quality
+        # Apply moderate JPEG compression
         jpeg_buffer = io.BytesIO()
-        compressed_image.save(jpeg_buffer, format='JPEG', quality=70, optimize=True)
+        compressed_image.save(jpeg_buffer, format='JPEG', quality=75, optimize=True)
         jpeg_buffer.seek(0)
         compressed_image = PILImage.open(jpeg_buffer)
         
-        # Recalculate scaled OCR coordinates
+        # Scale OCR coordinates to match resized image
         new_width, new_height = compressed_image.size
         width_scale = new_width / original_width
         height_scale = new_height / original_height
@@ -237,7 +230,19 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
                 scaled_bbox.append([scaled_x, scaled_y])
             scaled_ocr_results.append((scaled_bbox, text, confidence))
         
-        create_pdf_with_image(compressed_image, scaled_ocr_results, temp_output)
+        # Test PDF size with this compression
+        test_size = create_pdf_with_image(compressed_image, scaled_ocr_results, temp_output)
+        
+        if test_size <= max_size_bytes:
+            logger.info(f"Achieved target size with {resize_factor*100:.0f}% resize: {test_size / 1024 / 1024:.1f}MB")
+            os.rename(temp_output, output_path)
+            return
+        
+        logger.info(f"Resize to {resize_factor*100:.0f}% still too large: {test_size / 1024 / 1024:.1f}MB")
+    
+    # If we get here, use the last compressed version (it's the best we can do)
+    logger.warning(f"Could not achieve target size, using maximum compression: {test_size / 1024 / 1024:.1f}MB")
+    os.rename(temp_output, output_path)
     
     # Move temp file to final location
     os.rename(temp_output, output_path)
