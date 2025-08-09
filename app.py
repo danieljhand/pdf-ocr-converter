@@ -8,6 +8,7 @@ import streamlit as st
 import zipfile
 import io
 import logging
+import platform
 from PyPDF2 import PdfReader
 
 # Configure logging
@@ -53,14 +54,20 @@ def check_external_tools():
     Checks if required external tools are available.
     Returns (tools_available, missing_tools)
     """
-    tools = ['pdftoppm', 'tesseract']
+    tools_config = {
+        'pdftoppm': ['pdftoppm', '-h'],  # Use -h instead of --version
+        'tesseract': ['tesseract', '--version']
+    }
     missing_tools = []
     
-    for tool in tools:
+    for tool_name, command in tools_config.items():
         try:
-            subprocess.run([tool, '--version'], capture_output=True, check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            missing_tools.append(tool)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            # Accept both success (0) and help exit codes (1) for pdftoppm
+            if result.returncode not in [0, 1]:
+                missing_tools.append(tool_name)
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            missing_tools.append(tool_name)
     
     return len(missing_tools) == 0, missing_tools
 
@@ -197,7 +204,22 @@ def main():
         tools_available, missing_tools = check_external_tools()
         if not tools_available:
             st.error(f"Missing required tools: {', '.join(missing_tools)}")
-            st.info("Please install: sudo apt-get install poppler-utils tesseract-ocr (Ubuntu/Debian)")
+            
+            # Platform-specific installation instructions
+            system = platform.system().lower()
+            
+            if system == "darwin":  # macOS
+                st.info("**macOS Installation:**")
+                st.code("brew install poppler tesseract")
+            elif system == "linux":
+                st.info("**Linux Installation:**")
+                st.code("sudo apt-get install poppler-utils tesseract-ocr  # Ubuntu/Debian")
+                st.code("sudo yum install poppler-utils tesseract        # RHEL/CentOS")
+            else:
+                st.info("**Installation required:**")
+                st.write("- **poppler-utils** (for pdftoppm)")
+                st.write("- **tesseract-ocr** (for OCR processing)")
+            
             return
         
         # Display uploaded files with size info
