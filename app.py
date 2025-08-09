@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+DEFAULT_MAX_OUTPUT_PDF_SIZE_MB = 10  # Default maximum size for output PDFs
 
 def check_gpu_availability():
     """
@@ -111,7 +112,7 @@ def check_external_tools():
     
     return len(missing_tools) == 0, missing_tools
 
-def create_searchable_pdf(image, ocr_results, output_path):
+def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB):
     """
     Creates a searchable PDF with the original image and OCR text overlay.
     """
@@ -145,7 +146,7 @@ def create_searchable_pdf(image, ocr_results, output_path):
     
     c.save()
 
-def process_single_pdf(pdf_file, pdf_name):
+def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB):
     """
     Processes a single PDF file using pure Python libraries.
     Returns (processed_pdfs, error_message)
@@ -202,7 +203,7 @@ def process_single_pdf(pdf_file, pdf_name):
                 output_pdf_path = os.path.join(temp_dir, output_pdf_name)
                 
                 # Create PDF with original image and OCR text overlay
-                create_searchable_pdf(image, ocr_results, output_pdf_path)
+                create_searchable_pdf(image, ocr_results, output_pdf_path, max_size_mb=max_output_size_mb)
                 
                 # Verify output file was created and has content
                 if not os.path.exists(output_pdf_path) or os.path.getsize(output_pdf_path) == 0:
@@ -285,6 +286,19 @@ def main():
             st.info(f"💻 Using CPU processing: {gpu_info}")
             st.caption("For faster processing, install PyTorch with CUDA support")
         
+        # Add output size configuration
+        st.subheader("Output Settings")
+        max_output_size = st.slider(
+            "Maximum output PDF size (MB)",
+            min_value=1,
+            max_value=50,
+            value=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB,
+            step=1,
+            help="Larger sizes preserve more image quality but create bigger files. Smaller sizes compress images more aggressively."
+        )
+        
+        st.caption(f"Output PDFs will be compressed to stay under {max_output_size}MB each")
+        
         # Display uploaded files with size info
         for file in uploaded_files:
             file_size_mb = len(file.getvalue()) / 1024 / 1024
@@ -310,7 +324,7 @@ def main():
             for i, uploaded_file in enumerate(uploaded_files):
                 status_text.text(f"Processing {uploaded_file.name}...")
                 
-                processed_pdfs, error = process_single_pdf(uploaded_file, uploaded_file.name)
+                processed_pdfs, error = process_single_pdf(uploaded_file, uploaded_file.name, max_output_size_mb=max_output_size)
                 
                 if error:
                     st.error(f"Error processing {uploaded_file.name}: {error}")
