@@ -307,6 +307,111 @@ def create_searchable_pdf(image, ocr_results, output_path, max_size_mb=DEFAULT_M
     final_size = os.path.getsize(output_path)
     logger.info(f"Final PDF size: {final_size / 1024 / 1024:.1f}MB")
 
+def create_searchable_pdf_with_settings(image, ocr_results, output_path, max_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB, compression_settings=None):
+    """
+    Creates a searchable PDF using pre-determined compression settings.
+    Used for subsequent pages after optimal settings are found on the first page.
+    """
+    from PIL import Image as PILImage
+    import io
+    
+    # Check image dimensions and reduce if too large
+    max_pixels = 50_000_000  # 50 megapixels - reasonable limit
+    current_pixels = image.size[0] * image.size[1]
+    
+    if current_pixels > max_pixels:
+        logger.info(f"Image too large ({current_pixels:,} pixels), resizing for safety...")
+        scale_factor = (max_pixels / current_pixels) ** 0.5
+        new_width = int(image.size[0] * scale_factor)
+        new_height = int(image.size[1] * scale_factor)
+        image = image.resize((new_width, new_height), PILImage.LANCZOS)
+        logger.info(f"Resized to {new_width}x{new_height} ({new_width * new_height:,} pixels)")
+    
+    def create_pdf_with_image(img, ocr_data, path):
+        """Helper function to create PDF with given image and OCR data"""
+        img_width, img_height = img.size
+        c = canvas.Canvas(path, pagesize=(img_width, img_height))
+        
+        # Add the image as background
+        img_reader = ImageReader(img)
+        c.drawImage(img_reader, 0, 0, width=img_width, height=img_height)
+        
+        # Add invisible OCR text overlay
+        for (bbox, text, confidence) in ocr_data:
+            if confidence > 0.5:
+                x1, y1 = bbox[0]
+                x3, y3 = bbox[2]
+                
+                x = x1
+                y = img_height - y3
+                width = x3 - x1
+                height = y3 - y1
+                
+                c.setFillColorRGB(0, 0, 0, alpha=0)
+                c.setFont("Helvetica", max(8, height * 0.8))
+                c.drawString(x, y, text)
+        
+        c.save()
+        return os.path.getsize(path)
+    
+    # If no compression settings provided, fall back to full optimization
+    if compression_settings is None:
+        return create_searchable_pdf(image, ocr_results, output_path, max_size_mb)
+    
+    # Apply the cached compression settings
+    compressed_image = image.copy()
+    original_width, original_height = image.size
+    
+    # Convert to RGB if RGBA for better compression
+    if compressed_image.mode == 'RGBA':
+        rgb_image = PILImage.new('RGB', compressed_image.size, (255, 255, 255))
+        rgb_image.paste(compressed_image, mask=compressed_image.split()[-1])
+        compressed_image = rgb_image
+    
+    # Apply cached compression settings
+    if compression_settings['method'] == 'jpeg_only':
+        # Apply JPEG compression only
+        jpeg_buffer = io.BytesIO()
+        compressed_image.save(jpeg_buffer, format='JPEG', quality=compression_settings['jpeg_quality'], optimize=True)
+        jpeg_buffer.seek(0)
+        compressed_image = PILImage.open(jpeg_buffer)
+        
+        create_pdf_with_image(compressed_image, ocr_results, output_path)
+        
+    elif compression_settings['method'] == 'resize_and_jpeg':
+        # Apply resize and JPEG compression
+        target_dimension = int(max(original_width, original_height) * compression_settings['resize_factor'])
+        compressed_image.thumbnail((target_dimension, target_dimension), PILImage.LANCZOS)
+        
+        # Apply JPEG compression
+        jpeg_buffer = io.BytesIO()
+        compressed_image.save(jpeg_buffer, format='JPEG', quality=compression_settings['jpeg_quality'], optimize=True)
+        jpeg_buffer.seek(0)
+        compressed_image = PILImage.open(jpeg_buffer)
+        
+        # Scale OCR coordinates to match resized image
+        new_width, new_height = compressed_image.size
+        width_scale = new_width / original_width
+        height_scale = new_height / original_height
+        
+        scaled_ocr_results = []
+        for (bbox, text, confidence) in ocr_results:
+            scaled_bbox = []
+            for point in bbox:
+                scaled_x = point[0] * width_scale
+                scaled_y = point[1] * height_scale
+                scaled_bbox.append([scaled_x, scaled_y])
+            scaled_ocr_results.append((scaled_bbox, text, confidence))
+        
+        create_pdf_with_image(compressed_image, scaled_ocr_results, output_path)
+    
+    else:
+        # No compression needed
+        create_pdf_with_image(compressed_image, ocr_results, output_path)
+    
+    final_size = os.path.getsize(output_path)
+    logger.info(f"Applied cached compression settings: {final_size / 1024 / 1024:.1f}MB")
+
 def process_single_pdf(pdf_file, pdf_name, max_output_size_mb=DEFAULT_MAX_OUTPUT_PDF_SIZE_MB, progress_callback=None):
     """
     Processes a single PDF file using pure Python libraries.
